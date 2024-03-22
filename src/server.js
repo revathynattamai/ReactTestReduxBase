@@ -6,42 +6,57 @@ var cors = require("cors");
 const path = require('path');
 const fs = require('fs');
 var app = express();
+const csvParser = require("csv-parser");
 //MIDDLEWARES
 app.use(upload());
 app.use(cors());
 //ROUTE DEFINE
 
-function validateData(data) {
-  let endBalance = parseFloat(data["Start Balance"]) + parseFloat(data["Mutation"])
-    console.log(endBalance)
-    console.log(parseFloat(data["End Balance"]))
-    if(endBalance === parseFloat(data["End Balance"])) 
-    return data
-
+function validateBalance(data) {
+  console.log("data", data)
+  let referenceList = []
+  let failedTransactions = []
+  data.forEach((d) => {
+    let endBalance = parseFloat(d["Start Balance"]) + parseFloat(d["Mutation"])
+    if (referenceList.indexOf(d.Reference) !== -1) {
+      referenceList.push(d.Reference)
+      failedTransactions.push(d)
+    } else if (endBalance.toFixed(2) != parseFloat(d["End Balance"])) {
+      failedTransactions.push(d)
+    }
+  })
+  return failedTransactions;
 }
 app.post("/postFile/csv", async function (req, res) {
-     const file = req.files.file;
+  const file = req.files.file;
 
   if (!file || Object.keys(req.files).length === 0) {
     return res.status(400).send('No files were uploaded.');
   }
 
-  const fileUploadPath = __dirname + '/csvFiles/' + file.name;
+  const fileUploadPath = __dirname + '/parsed'+ file.name;
+
+  const createStream = fs.createWriteStream(fileUploadPath);
+createStream.end();
 
   // Use the mv() method to place the file somewhere on your server
   file.mv(fileUploadPath, (err) => {
     if (err)
-      return res.status(500).send(err); 
+      return res.status(500).send(err);
+  });
+
+  const result = [];
+  
+  fs.createReadStream(fileUploadPath)
+    .pipe(csvParser())
+    .on("data", (data) => {
+      console.log(data)
+      result.push(data);
+    })
+    .on("end", () => {
+      res.status(200).send(validateBalance(result));
     });
 
-  const uploadedFileReadStream = fs.createReadStream(fileUploadPath);
-  const csvRows = [];
-
-    uploadedFileReadStream
-    .pipe(fastCSV.parse({ headers: true, ignoreEmpty: true }))
-    .validate((data) => validateData(data))
-    .on('data', row => csvRows.push(row))
-    .on('end', () => res.status(200).json({csvRows}))
 });
 
 app.get("/emp", async function (req, res) {
